@@ -37,12 +37,10 @@ class ItemAlphanumeric extends Item {
 
   @Override
   boolean inError(final ServletRequest req, final Shield shield, final String value, boolean doAllBlocks, boolean log) {
-    ModeError me = isModeError(req, value);
-    if (me != null) {
+    if (hasPreValidationError(req, value)) {
       return true;
     }
-    int i = 0;
-    for (i = 0; i < value.length(); i++) {
+    for (int i = 0; i < value.length(); i++) {
       char c = value.charAt(i);
       if (isNotAlphanumeric(c)) {
         return true;

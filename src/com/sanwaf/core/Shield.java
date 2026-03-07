@@ -18,7 +18,7 @@ import com.sanwaf.log.Logger;
 
 final class Shield {
   private static final String STRICT_PARAMETER_DETECTED = "URI Strict Parameter Error - Unknown Parameter Detected";
-private static final String FAIL_ON_MATCH = "\tfailOnMatch=";
+  private static final String FAIL_ON_MATCH = "\tfailOnMatch=";
   private static final String REGEX_FILE_MARKER = "file=";
   Sanwaf sanwaf = null;
   Logger logger = null;
@@ -35,6 +35,8 @@ private static final String FAIL_ON_MATCH = "\tfailOnMatch=";
   Map<String, Rule> customRulePatterns = new HashMap<>();
   Map<String, Rule> rulePatternsDetect = new HashMap<>();
   Map<String, Rule> customRulePatternsDetect = new HashMap<>();
+  Rule[] rulePatternsArray;
+  Rule[] rulePatternsDetectArray;
   Metadata parameters = null;
   Metadata cookies = null;
   Metadata headers = null;
@@ -52,9 +54,9 @@ private static final String FAIL_ON_MATCH = "\tfailOnMatch=";
   }
 
   boolean threatDetected(ServletRequest req, boolean doAllBlocks, boolean log) {
-    return ((endpoints.enabled && endpointsThreatDetected(req, doAllBlocks, log)) || 
-            (parameters.enabled && parameterThreatDetected(req, doAllBlocks, log)) || 
-            (headers.enabled && headerThreatDetected(req, doAllBlocks, log)) || 
+    return ((endpoints.enabled && endpointsThreatDetected(req, doAllBlocks, log)) ||
+            (parameters.enabled && parameterThreatDetected(req, doAllBlocks, log)) ||
+            (headers.enabled && headerThreatDetected(req, doAllBlocks, log)) ||
             (cookies.enabled && cookieThreatDetected(req, doAllBlocks, log)));
   }
 
@@ -65,7 +67,7 @@ private static final String FAIL_ON_MATCH = "\tfailOnMatch=";
     String k = null;
     String[] values = null;
     boolean threat = false;
-    
+
     if(doAllBlocks) {
       Metadata metadataDetectDetect = endpointsDetect.endpointParametersDetect.get(uri);
       Metadata metadataDetectBlock = endpointsDetect.endpointParametersBlock.get(uri);
@@ -98,7 +100,7 @@ private static final String FAIL_ON_MATCH = "\tfailOnMatch=";
           }
         }
         for (String v : values) {
-          if(metadataBlockBlock != null && metadataBlockBlock.endpointMode != Modes.DISABLED && 
+          if(metadataBlockBlock != null && metadataBlockBlock.endpointMode != Modes.DISABLED &&
               threat(req, metadataBlockBlock, k, v, true, doAllBlocks, log)){
               if(!doAllBlocks) {
                 return true;
@@ -138,25 +140,21 @@ private static final String FAIL_ON_MATCH = "\tfailOnMatch=";
 
   private boolean headerThreatDetected(ServletRequest req, boolean doAllBlocks, boolean log) {
     boolean threat = false;
-    Enumeration<?> names = ((HttpServletRequest) req).getHeaderNames();
+    HttpServletRequest hreq = (HttpServletRequest) req;
+    Enumeration<?> names = hreq.getHeaderNames();
     while (names.hasMoreElements()) {
       String s = String.valueOf(names.nextElement());
-      Enumeration<?> headerEnumeration = ((HttpServletRequest) req).getHeaders(s);
+      Enumeration<?> headerEnumeration = hreq.getHeaders(s);
       while (headerEnumeration.hasMoreElements()) {
-        threat(req, headersDetect, s, (String) headerEnumeration.nextElement(), false, doAllBlocks, log);
-      }
-    }
-    
-    names = ((HttpServletRequest) req).getHeaderNames();
-    while (names.hasMoreElements()) {
-      String s = String.valueOf(names.nextElement());
-      Enumeration<?> headerEnumeration = ((HttpServletRequest) req).getHeaders(s);
-      while (headerEnumeration.hasMoreElements()) {
-        if (threat(req, headers, s, (String) headerEnumeration.nextElement(), false, doAllBlocks, log)) {
+        String headerValue = (String) headerEnumeration.nextElement();
+        // process detects first
+        threat(req, headersDetect, s, headerValue, false, doAllBlocks, log);
+        // then blocks
+        if (threat(req, headers, s, headerValue, false, doAllBlocks, log)) {
           if(!doAllBlocks) {
             return true;
           }
-          threat = true;;
+          threat = true;
         }
       }
     }
@@ -209,8 +207,8 @@ private static final String FAIL_ON_MATCH = "\tfailOnMatch=";
       item = getItemFromMetaOrIndex(meta, key);
       if (item == null) {
         if (forceStringPatterns) {
-          item = new ItemString();
-        } 
+          item = ItemString.DEFAULT_INSTANCE;
+        }
         else {
           if(meta.endpointIsStrict && MetadataEndpoints.isStrictError(req, meta)) {
               Item.handleStrictError(STRICT_PARAMETER_DETECTED, req, logger, log);
@@ -220,27 +218,23 @@ private static final String FAIL_ON_MATCH = "\tfailOnMatch=";
         }
       }
     } else {
-      item = new ItemString();
+      item = ItemString.DEFAULT_INSTANCE;
     }
 
     if (item.required && value.length() == 0) {
-      item.handleMode(true, value, req, item.mode, log, doAllBlocks);
-      //return item.returnBasedOnDoAllBlocks(true, doAllBlocks);
-      return true;
+      return item.handleMode(value, req, item.mode, log, doAllBlocks, null);
     }
-    
-    String relmsg = item.isRelateValid(value, req, meta);
-    if(relmsg != null) {
-      item.relatedErrMsg = relmsg;
-      item.handleMode(true, value, req, item.mode, log, doAllBlocks);
-      //return item.returnBasedOnDoAllBlocks(true, doAllBlocks);
-      return true;
+
+    if (item.related != null && item.related.length() > 0) {
+      String relmsg = item.isRelateValid(value, req, meta);
+      if(relmsg != null) {
+        return item.handleMode(value, req, item.mode, log, doAllBlocks, relmsg);
+      }
     }
-    
-    if((isEndpoint && isEndpointStrictValid(item, value, req, meta, doAllBlocks, log)) || 
+
+    if((isEndpoint && isEndpointStrictValid(item, value, req, meta, doAllBlocks, log)) ||
         item.inError(req, this, value, doAllBlocks, log)){
-      item.handleMode(true, value, req, item.mode, log, doAllBlocks);
-      return true;
+      return item.handleMode(value, req, item.mode, log, doAllBlocks, null);
     }
     return false;
   }
@@ -284,7 +278,7 @@ private static final String FAIL_ON_MATCH = "\tfailOnMatch=";
     Item item;
     item = getItem(meta, key);
     if (item == null && regexAlways && !regexAlwaysExclusions.contains(key)) {
-      item = new ItemString();
+      item = ItemString.DEFAULT_INSTANCE;
     }
     return item;
   }
@@ -385,6 +379,8 @@ private static final String FAIL_ON_MATCH = "\tfailOnMatch=";
 
     Xml regexBlockXml = new Xml(shieldXml.get(XML_REGEX_CONFIG));
     loadPatterns(regexBlockXml);
+    rulePatternsArray = rulePatterns.values().toArray(new Rule[0]);
+    rulePatternsDetectArray = rulePatternsDetect.values().toArray(new Rule[0]);
     regexMinLen = parseInt(regexBlockXml.get(XML_MIN_LEN), regexMinLen);
     if (regexMinLen == -1) {
       regexMinLen = Integer.MAX_VALUE;
@@ -617,6 +613,10 @@ class Rule {
     if ("pass".equalsIgnoreCase(match)) {
       failOnMatch = false;
     }
-    this.msg = msg; 
+    this.msg = msg;
+  }
+
+  java.util.regex.Matcher matcher(String value) {
+    return pattern.matcher(value);
   }
 }

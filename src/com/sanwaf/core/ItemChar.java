@@ -1,6 +1,6 @@
 package com.sanwaf.core;
 
-import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import jakarta.servlet.ServletRequest;
@@ -14,8 +14,7 @@ final class ItemChar extends Item {
 
   @Override
   boolean inError(final ServletRequest req, final Shield shield, final String value, boolean doAllBlocks, boolean log) {
-    ModeError me = isModeError(req, value);
-    if (me != null) {
+    if (hasPreValidationError(req, value)) {
       return true;
     }
     if (value == null) {
@@ -29,12 +28,10 @@ final class ItemChar extends Item {
 
   @Override
   List<Point> getErrorPoints(Shield shield, String value) {
-    List<Point> points = new ArrayList<>();
     if (maskError.length() > 0) {
-      return points;
+      return Collections.emptyList();
     }
-    points.add(new Point(0, value.length()));
-    return points;
+    return Collections.singletonList(new Point(0, value.length()));
   }
 
   @Override

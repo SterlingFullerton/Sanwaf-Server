@@ -175,8 +175,9 @@ public class MultiDimentionalyParmsTest {
     Shield sh = UnitTestUtil.getShield(sw, "MultiDimTest");
     sh.parameters = new Metadata(shield, new Xml(""), "", sw.logger, false);
     sh.parameters.enabled = true;
-    Metadata.initA2Zindex(sh.parameters.index);
-    sh.parameters.index.put("f", Arrays.asList(Metadata.INDEX_PARM_MARKER + "foo"));
+    java.util.Set<String> set = new java.util.LinkedHashSet<>();
+    set.add(Metadata.INDEX_PARM_MARKER + "foo");
+    sh.parameters.index.put("f", set);
 
     MockHttpServletRequest r = new MockHttpServletRequest();
     r.addParameter("foo0", "<script>alert(1)</script>");

@@ -1,6 +1,6 @@
 package com.sanwaf.core;
 
-import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -21,24 +21,23 @@ final class ItemRegex extends Item {
 
   @Override
   List<Point> getErrorPoints(final Shield shield, final String value) {
-    List<Point> points = new ArrayList<>();
     if (value == null || value.length() == 0 || maskError.length() > 0) {
-      return points;
+      return Collections.emptyList();
     }
     if (rule == null) {
       rule = shield.customRulePatterns.get(patternName);
     }
     Matcher m = rule.pattern.matcher(value);
-    if ((m.find() && rule.failOnMatch) || (!m.find() && !rule.failOnMatch)) {
-      points.add(new Point(0, value.length()));
+    boolean found = m.find();
+    if ((found && rule.failOnMatch) || (!found && !rule.failOnMatch)) {
+      return Collections.singletonList(new Point(0, value.length()));
     }
-    return points;
+    return Collections.emptyList();
   }
 
   @Override
   boolean inError(final ServletRequest req, final Shield shield, final String value, boolean doAllBlocks, boolean log) {
-    ModeError me = isModeError(req, value);
-    if (me != null) {
+    if (hasPreValidationError(req, value)) {
       return true;
     }
     if (rule == null) {
@@ -58,7 +57,7 @@ final class ItemRegex extends Item {
     }
     boolean match = rule.pattern.matcher(value).find();
     if ((rule.failOnMatch && match) || (!rule.failOnMatch && !match)) {
-      handleMode(true, value, req, rule.mode, log);
+      handleMode(value, req, rule.mode, log);
       if (rule.mode == Modes.BLOCK && mode == Modes.BLOCK) {
         return true;
       }

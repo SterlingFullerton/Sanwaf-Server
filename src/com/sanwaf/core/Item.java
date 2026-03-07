@@ -1,7 +1,10 @@
 package com.sanwaf.core;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import jakarta.servlet.ServletRequest;
 import jakarta.servlet.http.HttpServletRequest;
@@ -18,11 +21,10 @@ abstract class Item {
   double maxValue;
   double minValue;
   String msg = null;
-  String[] uri = null;
+  Set<String> uriSet = null;
   Modes mode = Modes.BLOCK;
   boolean required = false;
   String related;
-  String relatedErrMsg;
   String maskError = "";
 
   Item() {
@@ -54,40 +56,24 @@ abstract class Item {
 
   abstract Types getType();
 
-  // evaluate the mode, URI & size. The method returns null if no definitive
-  // results was found and caller continues validation
-  ModeError isModeError(ServletRequest req, String value) {
-    ModeError me = new ModeError(false);
-    if (mode == Modes.DISABLED) {
-      return me;
-    } else if (!isUriValid(req)) {
-      me.error = true;
-      me.isUri = true;
-    } else if (isSizeError(value)) {
-      me.error = true;
-      me.isSize = true;
-    } else {
-      return null;
-    }
-    return me;
+  boolean hasPreValidationError(ServletRequest req, String value) {
+    return mode == Modes.DISABLED || isUriInvalid(req) || isSizeError(value);
   }
 
-  boolean isUriValid(ServletRequest req) {
-    if (uri == null || req == null) {
-      return true;
+  boolean isUriInvalid(ServletRequest req) {
+    if (uriSet == null || req == null) {
+      return false;
     }
     String reqUri = ((HttpServletRequest) req).getRequestURI();
-    for (String u : uri) {
-      if (u.equals(reqUri)) {
-        return true;
-      }
-    }
-    return false;
+    return !uriSet.contains(reqUri);
   }
 
   boolean isSizeError(String value) {
     if (!required && (value == null || value.length() == 0)) {
       return false;
+    }
+    if (value == null) {
+      return true;
     }
     return (value.length() < min || value.length() > max);
   }
@@ -96,35 +82,64 @@ abstract class Item {
     return errorMsg;
   }
 
+  static String replacePlaceholder(String errorMsg, String replacement) {
+    int i = errorMsg.indexOf(ItemFactory.XML_ERROR_MSG_PLACEHOLDER1);
+    if (i >= 0) {
+      int pLen = ItemFactory.XML_ERROR_MSG_PLACEHOLDER1.length();
+      return errorMsg.substring(0, i) + replacement + errorMsg.substring(i + pLen);
+    }
+    return errorMsg;
+  }
+
   private void setUri(String uriString) {
     if (uriString != null && uriString.length() > 0) {
-      uri = uriString.split(Shield.SEPARATOR);
+      String[] parts = uriString.split(Shield.SEPARATOR);
+      uriSet = new HashSet<>(parts.length * 2);
+      Collections.addAll(uriSet, parts);
     }
   }
 
-  boolean handleMode(boolean err, String value, ServletRequest req, Modes action, boolean log) {
-    return handleMode(err, value, req, action, log, false);
+  void handleMode(String value, ServletRequest req, Modes action, boolean log) {
+    handleMode(value, req, action, log, false, null, null);
   }
 
-  boolean handleMode(boolean err, String value, ServletRequest req, Modes action, boolean log, boolean doAllBlocks) {
-    if (!err || Modes.DISABLED == action) {
+  void handleMode(String value, ServletRequest req, Modes action, boolean log, List<Point> errorPoints) {
+    handleMode(value, req, action, log, false, null, errorPoints);
+  }
+
+  boolean handleMode(String value, ServletRequest req, Modes action, boolean log, boolean doAllBlocks, String relatedErrMsg) {
+    return handleMode(value, req, action, log, doAllBlocks, relatedErrMsg, null);
+  }
+
+  boolean handleMode(String value, ServletRequest req, Modes action, boolean log, boolean doAllBlocks, String relatedErrMsg, List<Point> errorPoints) {
+    if (Modes.DISABLED == action) {
       return false;
     }
     if (Modes.BLOCK == mode) {
-      if (logger != null && log && !doAllBlocks && (shield == null || shield.sanwaf.onErrorLogParmErrors)) {
-        logger.error(toJson(value, mode, req, true));
+      boolean doLog = logger != null && log && !doAllBlocks && (shield == null || shield.sanwaf.onErrorLogParmErrors);
+      boolean doAttr = req != null && (shield == null || shield.sanwaf.onErrorAddParmErrors);
+      if (doLog || doAttr) {
+        String json = toJson(value, mode, req, true, relatedErrMsg, errorPoints);
+        if (doLog) {
+          logger.error(json);
+        }
+        if (doAttr) {
+          appendAttribute(Sanwaf.ATT_LOG_ERROR, json, req);
+        }
       }
-      if ((shield == null || shield.sanwaf.onErrorAddParmErrors)) {
-        appendAttribute(Sanwaf.ATT_LOG_ERROR, toJson(value, mode, req, true), req);
-      }
-      return err;
+      return true;
     } else {
       // DO DETECTS
-      if (logger != null && log && (shield == null || shield.sanwaf.onErrorLogParmDetections)) {
-        logger.warn(toJson(value, mode, req, true));
-      }
-      if ((shield == null || shield.sanwaf.onErrorAddParmDetections)) {
-        appendAttribute(Sanwaf.ATT_LOG_DETECT, toJson(value, mode, req, true), req);
+      boolean doLog = logger != null && log && (shield == null || shield.sanwaf.onErrorLogParmDetections);
+      boolean doAttr = req != null && (shield == null || shield.sanwaf.onErrorAddParmDetections);
+      if (doLog || doAttr) {
+        String json = toJson(value, mode, req, true, relatedErrMsg, errorPoints);
+        if (doLog) {
+          logger.warn(json);
+        }
+        if (doAttr) {
+          appendAttribute(Sanwaf.ATT_LOG_DETECT, json, req);
+        }
       }
     }
     return false;
@@ -133,9 +148,9 @@ abstract class Item {
   static boolean handleStrictError(String value, ServletRequest req, com.sanwaf.log.Logger logger, boolean log) {
     ItemStrict item = new ItemStrict(value);
     if (log) {
-      logger.error(item.toJson(item.msg, Modes.BLOCK, null, true));
+      logger.error(item.toJson(item.msg, Modes.BLOCK, null, true, null, null));
     }
-    appendAttribute(Sanwaf.ATT_LOG_ERROR, item.toJson(value, Modes.BLOCK, null, true), req);
+    appendAttribute(Sanwaf.ATT_LOG_ERROR, item.toJson(value, Modes.BLOCK, null, true, null, null), req);
     return true;
   }
 
@@ -153,13 +168,6 @@ abstract class Item {
       old = old.substring(1, old.length() - 1) + ",";
     }
     req.setAttribute(att, "[" + old + value + "]");
-  }
-
-  boolean returnBasedOnDoAllBlocks(boolean b, boolean doAllBlocks) {
-    if (doAllBlocks) {
-      return false;
-    }
-    return b;
   }
 
   // Item Relations code
@@ -309,16 +317,20 @@ abstract class Item {
     return blocks;
   }
 
+  String getDefaultErrorMessage() {
+    return "Validation Error";
+  }
+
 //log code
   String getProperties() {
     return null;
   }
 
   public String toString() {
-    return toJson(null, null, null, true);
+    return toJson(null, null, null, true, null, null);
   }
 
-  public String toJson(String value, Modes thisMode, ServletRequest req, boolean verbose) {
+  public String toJson(String value, Modes thisMode, ServletRequest req, boolean verbose, String relatedErrMsg, List<Point> errorPoints) {
     StringBuilder sb = new StringBuilder();
     sb.append("{");
 
@@ -374,11 +386,10 @@ abstract class Item {
     }
 
     if (value != null && shield != null && verbose) {
-      List<Point> errorPoints = new ArrayList<>();
-      errorPoints.addAll(getErrorPoints(shield, value));
+      List<Point> points = (errorPoints != null) ? errorPoints : getErrorPoints(shield, value);
       sb.append(",\"samplePoints\":[");
       boolean doneFirst = false;
-      for (Point p : errorPoints) {
+      for (Point p : points) {
         if (doneFirst) {
           sb.append(",");
         } else {
@@ -395,7 +406,7 @@ abstract class Item {
       sb.append("\"maxlength\":\"").append(max).append("\"");
       sb.append(",\"minlength\":\"").append(min).append("\"");
       sb.append(",\"msg\":\"").append(Metadata.jsonEncode(msg)).append("\"");
-      sb.append(",\"uri\":\"").append(Metadata.jsonEncode(String.valueOf(uri))).append("\"");
+      sb.append(",\"uri\":\"").append(Metadata.jsonEncode(String.valueOf(uriSet))).append("\"");
       sb.append(",\"req\":\"").append(required).append("\"");
       sb.append(",\"maxvalue\":\"").append(maxValue).append("\"");
       sb.append(",\"minvalue\":\"").append(minValue).append("\"");

@@ -1,6 +1,7 @@
 package com.sanwaf.core;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import jakarta.servlet.ServletRequest;
@@ -17,10 +18,10 @@ class ItemNumeric extends Item {
 
   @Override
   List<Point> getErrorPoints(final Shield shield, final String value) {
-    List<Point> points = new ArrayList<>();
     if (maskError.length() > 0) {
-      return points;
+      return Collections.emptyList();
     }
+    List<Point> points = new ArrayList<>();
     final int len = value.length();
     int errStart = -1;
     boolean foundDot = false;
@@ -68,10 +69,8 @@ class ItemNumeric extends Item {
       return false;
     }
     try {
-      if (Double.parseDouble(value) > maxValue) {
-        return true;
-      }
-      if (Double.parseDouble(value) < minValue) {
+      double d = Double.parseDouble(value);
+      if (d > maxValue || d < minValue) {
         return true;
       }
     } catch (NumberFormatException nfe) {
@@ -82,8 +81,7 @@ class ItemNumeric extends Item {
 
   @Override
   boolean inError(final ServletRequest req, final Shield shield, final String value, boolean doAllBlocks, boolean log) {
-    ModeError me = isModeError(req, value);
-    if (me != null) {
+    if (hasPreValidationError(req, value)) {
       return true;
     }
     if (isMaxMinValueError(value)) {

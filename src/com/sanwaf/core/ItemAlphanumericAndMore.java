@@ -1,6 +1,7 @@
 package com.sanwaf.core;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import jakarta.servlet.ServletRequest;
@@ -17,6 +18,7 @@ final class ItemAlphanumericAndMore extends ItemAlphanumeric {
   static final String CARRIAGE_RETURN_LONG = "<carriage return>";
 
   char[] moreChars = new char[0];
+  boolean[] moreCharsLookup = new boolean[128];
 
   ItemAlphanumericAndMore(ItemData id) {
     super(id);
@@ -25,10 +27,10 @@ final class ItemAlphanumericAndMore extends ItemAlphanumeric {
 
   @Override
   List<Point> getErrorPoints(final Shield shield, final String value) {
-    List<Point> points = new ArrayList<>();
     if (value == null || maskError.length() > 0) {
-      return points;
+      return Collections.emptyList();
     }
+    List<Point> points = new ArrayList<>();
     int start = -1;
     int len = value.length();
     for (int i = 0; i < len; i++) {
@@ -65,12 +67,11 @@ final class ItemAlphanumericAndMore extends ItemAlphanumeric {
 
   @Override
   boolean inError(final ServletRequest req, final Shield shield, final String value, boolean doAllBlocks, boolean log) {
-    ModeError me = isModeError(req, value);
-    if (me != null) {
-      //return returnBasedOnDoAllBlocks(handleMode(me.error, value, req, mode, log), doAllBlocks);
+    if (hasPreValidationError(req, value)) {
       return true;
     }
-    for (int i = 0; i < value.length(); i++) {
+    int len = value.length();
+    for (int i = 0; i < len; i++) {
       char c = value.charAt(i);
       if (isNotAlphanumeric(c) && !isInMoreChars(c)) {
         return true;
@@ -80,6 +81,9 @@ final class ItemAlphanumericAndMore extends ItemAlphanumeric {
   }
 
   private boolean isInMoreChars(char c) {
+    if (c < 128) {
+      return moreCharsLookup[c];
+    }
     for (char more : moreChars) {
       if (c == more) {
         return true;
@@ -116,10 +120,18 @@ final class ItemAlphanumericAndMore extends ItemAlphanumeric {
 
   static String replaceString(String s, String from, String to) {
     int i = s.indexOf(from);
-    if (i >= 0) {
-      s = s.substring(0, i) + to + s.substring(i + from.length(), s.length());
+    if (i < 0) {
+      return s;
     }
-    return s;
+    StringBuilder sb = new StringBuilder();
+    int last = 0;
+    while (i >= 0) {
+      sb.append(s, last, i).append(to);
+      last = i + from.length();
+      i = s.indexOf(from, last);
+    }
+    sb.append(s, last, s.length());
+    return sb.toString();
   }
 
   private void setMoreChars(String value) {
@@ -127,6 +139,13 @@ final class ItemAlphanumericAndMore extends ItemAlphanumeric {
     int end = value.lastIndexOf(ItemFactory.SEP_END);
     char[] array = getMoreCharArray(value.substring(start + ItemFactory.SEP_START.length(), end));
     moreChars = array;
+    boolean[] lookup = new boolean[128];
+    for (char c : array) {
+      if (c < 128) {
+        lookup[c] = true;
+      }
+    }
+    moreCharsLookup = lookup;
   }
 
   @Override

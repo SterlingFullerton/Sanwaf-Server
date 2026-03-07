@@ -2,8 +2,10 @@ package com.sanwaf.core;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 class Metadata {
   static final String XML_METADATA = "metadata";
@@ -14,6 +16,13 @@ class Metadata {
   static final String INDEX_PARM_MARKER = "  ";
   static final String STAR = "*";
 
+  private static final String[] CHAR_STRINGS = new String[128];
+  static {
+    for (int i = 0; i < 128; i++) {
+      CHAR_STRINGS[i] = String.valueOf((char) i);
+    }
+  }
+
   com.sanwaf.log.Logger logger;
   boolean enabled = false;
   boolean caseSensitive = true;
@@ -21,7 +30,7 @@ class Metadata {
   boolean endpointIsStrictAllowLess = false;
   Modes endpointMode = Modes.BLOCK;
   Map<String, Item> items = new HashMap<>();
-  Map<String, List<String>> index = new HashMap<>();
+  Map<String, Set<String>> index = new HashMap<>();
   Shield shield;
 
   Metadata(Shield shield, Xml xml, String type, com.sanwaf.log.Logger logger, boolean isDetect) {
@@ -44,8 +53,6 @@ class Metadata {
   }
 
   void load(Shield shield, Xml xml, String type, boolean isDetect) {
-    initA2Zindex(index);
-
     String metadataBlock = xml.get(XML_METADATA);
     Xml metadataBlockXml = new Xml(metadataBlock);
     String securedBlock = metadataBlockXml.get(XML_SECURED);
@@ -107,7 +114,6 @@ class Metadata {
   }
 
   void loadEndpoints(Shield shield, String itemsString, boolean caseSensitive, boolean includeEndpointAttributes, boolean isDetect) {
-    initA2Zindex(index);
     enabled = true;
     this.caseSensitive = caseSensitive;
 
@@ -118,13 +124,14 @@ class Metadata {
     }
   }
 
-  static void initA2Zindex(Map<String, List<String>> map) {
-    for (char ch = 'a'; ch <= 'z'; ++ch) {
-      map.put(String.valueOf(ch), null);
+  static String charString(char c) {
+    if (c < 128) {
+      return CHAR_STRINGS[c];
     }
+    return String.valueOf(c);
   }
 
-  static String refineName(String name, Map<String, List<String>> map) {
+  static String refineName(String name, Map<String, Set<String>> map) {
     int last = 0;
     while (true) {
       int starPos = name.indexOf(STAR, last);
@@ -134,36 +141,40 @@ class Metadata {
       if (starPos == 0) {
         return null;
       }
-      String f = name.substring(starPos - 1, starPos);
+      String f = charString(name.charAt(starPos - 1));
       String markerChars;
 
       if (starPos == name.length() - 1) {
         markerChars = INDEX_PARM_MARKER + name.substring(0, name.length() - 1);
       } else {
-        markerChars = f + name.substring(starPos + 1, starPos + 2);
+        markerChars = f + charString(name.charAt(starPos + 1));
         if (!isNotAlphanumeric(markerChars)) {
           return null;
         }
       }
-      String firstCharOfKey = name.substring(0, 1);
-      List<String> chars = map.computeIfAbsent(firstCharOfKey, k -> new ArrayList<>());
-      if (!chars.contains(markerChars)) {
-        chars.add(markerChars);
-      }
+      String firstCharOfKey = charString(name.charAt(0));
+      Set<String> chars = map.computeIfAbsent(firstCharOfKey, k -> new LinkedHashSet<>());
+      chars.add(markerChars);
       name = name.substring(0, starPos) + name.substring(starPos + 1, name.length());
     }
   }
 
   static String stripEosNumbers(final String s) {
     int i = s.length() - 1;
+    if (i <= 0) {
+      return s;
+    }
+    char c = s.charAt(i);
+    if (c < '0' || c > '9') {
+      return s;
+    }
+    i--;
     while (i > 0) {
-      char c = s.charAt(i);
-      int v = c - '0';
-      if (v >= 0 && v <= 9) {
-        i--;
-        continue;
+      c = s.charAt(i);
+      if (c < '0' || c > '9') {
+        return s.substring(0, i + 1);
       }
-      return s.substring(0, i + 1);
+      i--;
     }
     return s;
   }
@@ -189,25 +200,28 @@ class Metadata {
   }
 
   String getFromIndex(String key) {
-    if (key == null) {
-      return "";
+    if (key == null || key.length() == 0) {
+      return null;
     }
-    List<String> list = index.get(key.substring(0, 1));
-    if (list == null) {
+    String firstChar = charString(key.charAt(0));
+    Set<String> set = index.get(firstChar);
+    if (set == null) {
       return null;
     }
 
-    for (String s : list) {
+    for (String s : set) {
       int last = 0;
       while (true) {
         if (s.length() != 2) {
-          return resolveStarAtEndOfWord(key, list);
+          return resolveStarAtEndOfWord(key, set);
         }
-        int start = key.indexOf(s.charAt(0), last);
+        char c0 = s.charAt(0);
+        char c1 = s.charAt(1);
+        int start = key.indexOf(c0, last);
         if (start <= 0) {
           break;
         }
-        int end = key.indexOf(s.charAt(1), start + 1);
+        int end = key.indexOf(c1, start + 1);
         last = end + 1;
         key = key.substring(0, start + 1) + key.substring(end, key.length());
       }
@@ -215,12 +229,15 @@ class Metadata {
     return key;
   }
 
-  private String resolveStarAtEndOfWord(String key, List<String> list) {
+  private String resolveStarAtEndOfWord(String key, Set<String> set) {
     String k2 = stripEosNumbers(key);
-    if (list.contains(INDEX_PARM_MARKER + k2)) {
+    if (set.contains(INDEX_PARM_MARKER + k2)) {
       return k2;
     }
     return null;
   }
-}
 
+  Item getItem(String key) {
+    return items.get(key);
+  }
+}
